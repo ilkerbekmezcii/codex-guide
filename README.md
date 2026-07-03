@@ -41,6 +41,11 @@ Unlike a simple chat assistant, Codex CLI operates as an autonomous agent that c
 
 Install the Codex CLI globally depending on your operating system or environment:
 
+### 🪟 Windows (WinGet)
+```powershell
+winget install OpenAI.Codex
+```
+
 ### Global Installation (npm)
 ```bash
 npm install -g @openai/codex
