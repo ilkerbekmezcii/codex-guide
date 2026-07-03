@@ -1,3 +1,5 @@
+🌍 [English](README.md) | [Türkçe](README.tr.md) | [Español](README.es.md)
+
 # 🤖 Codex CLI — General User Guide
 
 > **The terminal-based AI coding agent developed by OpenAI that runs in your local shell.**
