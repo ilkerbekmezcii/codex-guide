@@ -44,7 +44,7 @@ Unlike a simple chat assistant, Codex CLI operates as an autonomous agent that c
 Install the Codex CLI globally depending on your operating system or environment:
 
 ### 🪟 Windows (WinGet)
-```powershell
+```bash
 winget install OpenAI.Codex
 ```
 
@@ -190,3 +190,11 @@ Type `/` in the prompt box to open the command menu, or `/help` to see the full 
 ---
 
 > **Codex CLI** — Proprietary — Developed with ❤️ by OpenAI
+
+---
+
+### 🎮 From Earth Games+
+
+Looking for a quick word challenge on Android? Try **Adam Asmaca Oyunu** — a Turkish/English hangman-style word game with categories, hints, progression and customizable themes.
+
+[▶ Play Adam Asmaca on Google Play](https://play.google.com/store/apps/details?id=com.spg.adamasmaca)
