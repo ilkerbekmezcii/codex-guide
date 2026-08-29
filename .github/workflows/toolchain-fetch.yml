@@ -62,3 +62,5 @@ jobs:
           path: ${{ runner.temp }}/out/
           compression-level: 0
           retention-days: 1
+
+# trigger
