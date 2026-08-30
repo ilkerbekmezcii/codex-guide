@@ -1,0 +1,163 @@
+name: Android Offline Library Bundle
+
+on:
+  push:
+    paths:
+      - 'android-offline-library-trigger.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Assemble offline Android build toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ROOT="$RUNNER_TEMP/offline-android"
+          OUT="$RUNNER_TEMP/out"
+          SDK="$ROOT/android-sdk"
+          mkdir -p "$SDK/cmdline-tools" "$OUT" "$ROOT/gradle" "$ROOT/jdk-21"
+
+          curl -fL --retry 5 --retry-delay 2 \
+            https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip \
+            -o "$RUNNER_TEMP/android-cli.zip"
+          echo '4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  '"$RUNNER_TEMP/android-cli.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/android-cli.zip" -d "$SDK/cmdline-tools"
+          mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" \
+            'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+          curl -fL --retry 5 --retry-delay 2 \
+            https://services.gradle.org/distributions/gradle-9.7.1-bin.zip \
+            -o "$RUNNER_TEMP/gradle.zip"
+          unzip -q "$RUNNER_TEMP/gradle.zip" -d "$ROOT/gradle"
+
+          cp -a "$JAVA_HOME/." "$ROOT/jdk-21/"
+
+          cat > "$ROOT/activate.sh" <<'EOF'
+          #!/usr/bin/env bash
+          ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          export JAVA_HOME="$ROOT/jdk-21"
+          export ANDROID_HOME="$ROOT/android-sdk"
+          export ANDROID_SDK_ROOT="$ROOT/android-sdk"
+          export GRADLE_HOME="$ROOT/gradle/gradle-9.7.1"
+          export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/36.0.0:$GRADLE_HOME/bin:$PATH"
+          EOF
+          chmod +x "$ROOT/activate.sh"
+
+          cat > "$ROOT/verify.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          ROOT="$(cd "$(dirname "$0")" && pwd)"
+          source "$ROOT/activate.sh"
+          java -version
+          sdkmanager --version
+          adb version
+          aapt2 version
+          apksigner version
+          gradle --version | head -n 10
+          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
+          echo VERIFY_OK
+          EOF
+          chmod +x "$ROOT/verify.sh"
+
+          cat > "$ROOT/build-basic-apk-offline.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          ROOT="$(cd "$(dirname "$0")" && pwd)"
+          source "$ROOT/activate.sh"
+          APPDIR="${1:-$PWD/offline-basic-app}"
+          OUT="$APPDIR/out"
+          mkdir -p "$APPDIR/src/com/earthgames/offlinetest" "$OUT/classes" "$OUT/dex"
+          cat > "$APPDIR/AndroidManifest.xml" <<'MANIFEST'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="36" />
+            <application android:theme="@android:style/Theme.Material.Light" android:label="Offline Build Test">
+              <activity android:name=".MainActivity" android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN" />
+                  <category android:name="android.intent.category.LAUNCHER" />
+                </intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          MANIFEST
+          cat > "$APPDIR/src/com/earthgames/offlinetest/MainActivity.java" <<'JAVA'
+          package com.earthgames.offlinetest;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.widget.TextView;
+          public class MainActivity extends Activity {
+            @Override public void onCreate(Bundle b) {
+              super.onCreate(b);
+              TextView v = new TextView(this);
+              v.setText("Offline Android build works");
+              v.setTextSize(24);
+              setContentView(v);
+            }
+          }
+          JAVA
+          ANDROID_JAR="$ANDROID_HOME/platforms/android-36/android.jar"
+          javac -source 8 -target 8 -classpath "$ANDROID_JAR" -d "$OUT/classes" $(find "$APPDIR/src" -name '*.java')
+          d8 --lib "$ANDROID_JAR" --output "$OUT/dex" $(find "$OUT/classes" -name '*.class')
+          aapt2 link -I "$ANDROID_JAR" --manifest "$APPDIR/AndroidManifest.xml" -o "$OUT/app-unsigned.apk"
+          (cd "$OUT/dex" && zip -q "$OUT/app-unsigned.apk" classes.dex)
+          zipalign -f 4 "$OUT/app-unsigned.apk" "$OUT/app-aligned.apk"
+          keytool -genkeypair -keystore "$OUT/debug.keystore" -storepass android -keypass android -alias androiddebugkey -dname 'CN=Android Debug,O=Earth Games,C=TR' -keyalg RSA -keysize 2048 -validity 10000 >/dev/null 2>&1
+          apksigner sign --ks "$OUT/debug.keystore" --ks-pass pass:android --key-pass pass:android --out "$OUT/app-debug.apk" "$OUT/app-aligned.apk"
+          apksigner verify --verbose "$OUT/app-debug.apk"
+          echo "$OUT/app-debug.apk"
+          EOF
+          chmod +x "$ROOT/build-basic-apk-offline.sh"
+
+          cat > "$ROOT/README.txt" <<'EOF'
+          FULL OFFLINE ANDROID BUILD TOOLCHAIN - Linux x86_64
+          Includes Temurin JDK 21, Android Command-Line Tools 15859902,
+          Android SDK Platform 36, Build-Tools 36.0.0, Platform-Tools,
+          and Gradle 9.7.1.
+
+          Offline restore:
+            tar -xzf android-offline-toolchain-api36-linux-x86_64.tar.gz
+            source activate.sh
+            ./verify.sh
+
+          A basic APK can be built with no Maven/AGP/network at all:
+            ./build-basic-apk-offline.sh /tmp/test-app
+
+          Existing Gradle projects may require their own third-party dependency cache.
+          EOF
+
+          "$ROOT/verify.sh"
+          "$ROOT/build-basic-apk-offline.sh" "$RUNNER_TEMP/smoke-app"
+          test -s "$RUNNER_TEMP/smoke-app/out/app-debug.apk"
+
+          (cd "$ROOT" && find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          tar -C "$ROOT" -czf "$OUT/android-offline-toolchain-api36-linux-x86_64.tar.gz" .
+          sha256sum "$OUT/android-offline-toolchain-api36-linux-x86_64.tar.gz" > "$OUT/android-offline-toolchain-api36-linux-x86_64.tar.gz.sha256"
+          cp "$RUNNER_TEMP/smoke-app/out/app-debug.apk" "$OUT/offline-build-smoke-test.apk"
+          ls -lh "$OUT"
+
+      - name: Upload complete offline toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-offline-toolchain-api36-linux-x86_64
+          path: |
+            ${{ runner.temp }}/out/android-offline-toolchain-api36-linux-x86_64.tar.gz
+            ${{ runner.temp }}/out/android-offline-toolchain-api36-linux-x86_64.tar.gz.sha256
+            ${{ runner.temp }}/out/offline-build-smoke-test.apk
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
