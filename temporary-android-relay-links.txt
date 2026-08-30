@@ -1,0 +1,8 @@
+Android command-line tools relay:
+https://avpjpoywjyhnvbaqxyip.supabase.co/functions/v1/blackchess-public-probe/file/android-cli
+
+Gradle 8.11.1 relay:
+https://avpjpoywjyhnvbaqxyip.supabase.co/functions/v1/blackchess-public-probe/file/gradle-8.11.1
+
+Android repository metadata relay:
+https://avpjpoywjyhnvbaqxyip.supabase.co/functions/v1/blackchess-public-probe/sdk/repository2-1.xml
