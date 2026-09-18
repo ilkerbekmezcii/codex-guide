@@ -1,0 +1,47 @@
+name: Android Minimal Emulator Bundle
+
+on:
+  push:
+    paths:
+      - android-emulator-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download emulator
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 5 --retry-delay 2             -o emulator-linux_x64-15917651.zip             https://dl.google.com/android/repository/emulator-linux_x64-15917651.zip
+          test "$(stat -c%s emulator-linux_x64-15917651.zip)" = "334378080"
+          echo "1b1f78891abf8ec268264356e1365c25519e8379  emulator-linux_x64-15917651.zip" | sha1sum -c -
+
+      - name: Download API 24 x86 system image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 5 --retry-delay 2             -o x86-24_r08.zip             https://dl.google.com/android/repository/sys-img/android/x86-24_r08.zip
+          test "$(stat -c%s x86-24_r08.zip)" = "313489224"
+          unzip -tq x86-24_r08.zip
+
+      - name: Upload emulator artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-emulator-linux-x64-15917651
+          path: emulator-linux_x64-15917651.zip
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload system image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-api24-default-x86-r08
+          path: x86-24_r08.zip
+          compression-level: 0
+          retention-days: 1
