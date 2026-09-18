@@ -14,8 +14,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          curl -fL --retry 4 -o baksmali.jar https://github.com/JesusFreke/smali/releases/download/v2.5.2/baksmali-2.5.2.jar
-          curl -fL --retry 4 -o smali.jar https://github.com/JesusFreke/smali/releases/download/v2.5.2/smali-2.5.2.jar
+          curl -fL --retry 4 -o baksmali.jar https://bitbucket.org/JesusFreke/smali/downloads/baksmali-2.5.2.jar
+          curl -fL --retry 4 -o smali.jar https://bitbucket.org/JesusFreke/smali/downloads/smali-2.5.2.jar
           java -jar baksmali.jar --version
           java -jar smali.jar --version
       - uses: actions/upload-artifact@v4
