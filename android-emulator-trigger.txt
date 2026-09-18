@@ -1,0 +1,2 @@
+trigger=2026-09-18T13:24:00Z
+purpose=build minimal Android emulator bundle
