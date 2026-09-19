@@ -1,77 +1,132 @@
-name: Android Offline Library Bundle
+name: Microsoft Rapor Temporary Build
 
 on:
   push:
+    branches: [main]
     paths:
       - 'android-offline-library-trigger.txt'
 
 permissions:
-  contents: read
-  issues: read
+  contents: write
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
+  test-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SRC_REPO: ilkerbekmezcii/microsoft-rapor-webview
+      SRC_REF: main
     steps:
-      - uses: actions/checkout@v4
+      - name: Create ephemeral runner key exchange
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          KEY_FILE="$RUNNER_TEMP/source-token.key"
+          PUB_FILE="$RUNNER_TEMP/source-token.pub"
+          PUB_REPO_PATH=".github/runner-key-${GITHUB_RUN_ID}.b64"
+          TOKEN_REPO_PATH=".github/runner-token-${GITHUB_RUN_ID}.b64"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$KEY_FILE" >/dev/null 2>&1
+          openssl pkey -in "$KEY_FILE" -pubout -out "$PUB_FILE" >/dev/null 2>&1
+          PUB_B64="$(base64 -w0 "$PUB_FILE")"
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${PUB_REPO_PATH}"             -f message="Publish ephemeral runner key ${GITHUB_RUN_ID}"             -f content="$PUB_B64" -f branch="${GITHUB_REF_NAME}" >/dev/null
+          echo "RUNNER_KEY_PATH=$PUB_REPO_PATH" >> "$GITHUB_ENV"
+          echo "RUNNER_TOKEN_PATH=$TOKEN_REPO_PATH" >> "$GITHUB_ENV"
+          echo "RUNNER_PRIVATE_KEY=$KEY_FILE" >> "$GITHUB_ENV"
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - name: Receive encrypted private-source token
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ENC_FILE="$RUNNER_TEMP/source-token.enc"
+          TOKEN_FILE="$RUNNER_TEMP/source-token.txt"
+          for attempt in $(seq 1 120); do
+            if gh api -H "Accept: application/vnd.github.raw+json"               "repos/${GITHUB_REPOSITORY}/contents/${RUNNER_TOKEN_PATH}?ref=${GITHUB_REF_NAME}"               > "$RUNNER_TEMP/source-token.b64" 2>/dev/null; then
+              base64 -d "$RUNNER_TEMP/source-token.b64" > "$ENC_FILE"
+              openssl pkeyutl -decrypt -inkey "$RUNNER_PRIVATE_KEY" -in "$ENC_FILE" -out "$TOKEN_FILE"                 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+              SRC_TOKEN="$(cat "$TOKEN_FILE")"
+              test -n "$SRC_TOKEN"
+              echo "::add-mask::$SRC_TOKEN"
+              echo "SRC_TOKEN=$SRC_TOKEN" >> "$GITHUB_ENV"
+              rm -f "$TOKEN_FILE" "$ENC_FILE" "$RUNNER_TEMP/source-token.b64"
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 3
+
+      - name: Checkout private source to runner temp only
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="$(printf 'x-access-token:%s' "$SRC_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone             --depth 1 --branch "$SRC_REF" "https://github.com/$SRC_REPO.git" "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Set up Gradle 8.10.2
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.10.2'
-
-      - name: Prepare Android SDK 35
+      - name: Prepare Android SDK
         shell: bash
         run: |
           set -euo pipefail
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          export ANDROID_HOME="/usr/local/lib/android/sdk"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -1)"
+          test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Fetch ephemeral source
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          BODY="$(gh api "repos/$GITHUB_REPOSITORY/issues/1" --jq .body)"
-          SOURCE_URL="${BODY#SOURCE_URL:}"
-          test -n "$SOURCE_URL"
-          mkdir -p "$RUNNER_TEMP/ota-src"
-          curl -fL --retry 3 "$SOURCE_URL" -o "$RUNNER_TEMP/source.zip"
-          unzip -q "$RUNNER_TEMP/source.zip" -d "$RUNNER_TEMP/ota-src"
-          SRC_DIR="$(find "$RUNNER_TEMP/ota-src" -name settings.gradle.kts -printf '%h\n' | head -n1)"
-          test -n "$SRC_DIR"
-          echo "SRC_DIR=$SRC_DIR" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Run unit tests
+        working-directory: ${{ runner.temp }}/source
+        run: gradle --no-daemon :app:testDebugUnitTest
 
       - name: Build debug APK
+        working-directory: ${{ runner.temp }}/source
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Prepare and verify APK
         shell: bash
         run: |
           set -euo pipefail
-          gradle -p "$SRC_DIR" :app:assembleDebug --stacktrace --no-daemon
+          APK="$RUNNER_TEMP/Microsoft-Rapor-1.1.apk"
+          cp "$RUNNER_TEMP/source/app/build/outputs/apk/debug/app-debug.apk" "$APK"
+          echo "SOURCE_COMMIT=$SOURCE_COMMIT"
+          echo "APK_SIZE=$(stat -c%s "$APK")"
+          echo "APK_SHA256=$(sha256sum "$APK" | awk '{print $1}')"
 
-      - name: Collect APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/out"
-          APK="$(find "$SRC_DIR/app/build/outputs/apk/debug" -type f -name '*.apk' | head -n1)"
-          test -f "$APK"
-          cp "$APK" "$RUNNER_TEMP/out/OllamaTerminalAgent-Android-v3.3.4-debug.apk"
-          sha256sum "$RUNNER_TEMP/out/OllamaTerminalAgent-Android-v3.3.4-debug.apk"
-          stat -c '%s' "$RUNNER_TEMP/out/OllamaTerminalAgent-Android-v3.3.4-debug.apk"
-
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OllamaTerminalAgent-Android-v3.3.4-debug
-          path: ${{ runner.temp }}/out/OllamaTerminalAgent-Android-v3.3.4-debug.apk
+          name: Microsoft-Rapor-1.1
+          path: ${{ runner.temp }}/Microsoft-Rapor-1.1.apk
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 3
+          compression-level: 0
+
+      - name: Cleanup ephemeral exchange files
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          for P in "${RUNNER_KEY_PATH:-}" "${RUNNER_TOKEN_PATH:-}"; do
+            [ -n "$P" ] || continue
+            SHA="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${P}?ref=${GITHUB_REF_NAME}" --jq .sha 2>/dev/null)"
+            [ -n "$SHA" ] || continue
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/contents/${P}"               -f message="Cleanup ephemeral runner exchange ${GITHUB_RUN_ID}"               -f sha="$SHA" -f branch="${GITHUB_REF_NAME}" >/dev/null 2>&1
+          done
+          rm -f "$RUNNER_TEMP/source-token.key" "$RUNNER_TEMP/source-token.pub" "$RUNNER_TEMP/source-token.txt" "$RUNNER_TEMP/source-token.enc"
