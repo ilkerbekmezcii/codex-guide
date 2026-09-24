@@ -1,8 +1,3 @@
-Android command-line tools relay:
-https://avpjpoywjyhnvbaqxyip.supabase.co/functions/v1/blackchess-public-probe/file/android-cli
+Temporary Android build transfer notes were removed.
 
-Gradle 8.11.1 relay:
-https://avpjpoywjyhnvbaqxyip.supabase.co/functions/v1/blackchess-public-probe/file/gradle-8.11.1
-
-Android repository metadata relay:
-https://avpjpoywjyhnvbaqxyip.supabase.co/functions/v1/blackchess-public-probe/sdk/repository2-1.xml
+This file intentionally keeps no temporary endpoint links, private URLs, or environment-specific artifact references.
