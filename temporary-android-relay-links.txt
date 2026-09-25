@@ -1,3 +1,0 @@
-Temporary Android build transfer notes were removed.
-
-This file intentionally keeps no temporary endpoint links, private URLs, or environment-specific artifact references.
